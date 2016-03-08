@@ -18,7 +18,24 @@ from mininet.log import  setLogLevel, info, error, warn
 from mininet.cli import CLI
 from mininet.link import OVSIntf, Intf
 from mininet.util import quietRun
-from domains import SegmentRoutedDomain
+from domains import Domain, SegmentRoutedDomain
+
+# Metro ONOS IP - determininstic
+MCTLS=[ '127.0.0.1' ]
+SWOPTS='--no-local-port --no-slicing'
+
+class EE(Domain):
+    """The UNI-side edge CpQD under Metro control."""
+    def build(self, cid):
+        """cid = ID of CO to which this edge 'belongs'"""
+
+        # add VLAN-aware host + EE node
+        uni = self.addHost('h%s11' % cid, cls=VLANHost)
+        ee = self.addSwitch('ee%d000' % cid, cls=UserSwitch, dpopts=SWOPTS)
+        self.addLink(uni, ee)
+
+        for i in MCTLS:
+            self.addController('c%d00' % cid, controller=RemoteController, ip=i)
 
 class CO(SegmentRoutedDomain):
 
@@ -30,18 +47,17 @@ class CO(SegmentRoutedDomain):
         """
         bipartite graph, where n = spine; m = leaf; f = host fanout
         """
-        opts='--no-local-port --no-slicing'
         l_nsw, l_msw, l_h = [], [], []
 
         # create n spine switches.
         for sw in range(n):
             l_nsw.append(self.addSwitch('spine%s%s' % (self.getId(), sw+1),
-                         cls=UserSwitch, dpopts=opts))
+                         cls=UserSwitch, dpopts=SWOPTS))
 
         # create m leaf switches, add f hosts.
         for sw in range(m):
             leaf = self.addSwitch('leaf%s0%s' % (self.getId(), sw+1),
-                                  cls=UserSwitch, dpopts=opts)
+                                  cls=UserSwitch, dpopts=SWOPTS)
             l_msw.append(self.noteLeaf(leaf))
 
         # last leaf is the tether.
@@ -52,20 +68,19 @@ class CO(SegmentRoutedDomain):
             for leaf in l_msw:
                 self.addLink(spine, leaf)
 
-        # add VLAN-aware host to EE-side leaf
-        ee = 'leaf%s01' % self.getId()
-        cpqd = self.addHost('h%s11' % self.getId(), cls=VLANHost)
-        self.addLink(cpqd, ee)
-
     def bootstrap(self, net, vlans, lf1_ifs=[], lf2_ifs=[]):
         """ Do post-build, pre-start work """
         #xc='xc%s-eth0' % self.getId()
         leaf1='leaf%s01' % self.getId()
         leaf2='leaf%s02' % self.getId()
 
-        # set EE MAC/IP. fix this so it can take more than 10 VLANs.
-        ee = self.getHosts('h%s11' % self.getId())
-        ee.setMAC(self.getMAC('11', '11'))
+        # stitch the CO and EE domains together
+        ee = net.get('ee%d000' % self.getId())
+        net.addLink(ee, leaf1)
+
+        # set UNI MAC/IP. fix this so it can take more than 10 VLANs.
+        uni = net.get('h%d11' % self.getId())
+        uni.setMAC(self.getMAC('11', '11'))
 
         # add the ports that we will use as VxLAN endpoints
         #quietRun('ip link add %s type veth peer name %s' % (xc, leaf))
@@ -77,7 +92,7 @@ class CO(SegmentRoutedDomain):
 
         # set the VLANs on host and cross connects.
         for v in vlans:
-            ee.addVLAN(int(v), '10.0.%s.%d/24' % (v, self.getId()))
+            uni.addVLAN(int(v), '10.0.%s.%d/24' % (v, self.getId()))
             #quietRun('vconfig add %s %d' % (xc, v))
             #quietRun('ifconfig %s.%d up' % (xc, v))
 
@@ -90,8 +105,6 @@ class CO(SegmentRoutedDomain):
         for i in lf2_ifs:
             #attachDev(net, self.getTether(), i)
             attachDev(net, leaf2, i)
-
-
 
     def toCfg(self):
         """ Dump a file in segment routing config file format. """
@@ -176,30 +189,35 @@ def attachDev(net, sw, dev):
     info("Interface %s is attached to switch %s.\n" % (dev, sw))
 
 def setup():
-    cos = []
+    cos = {}
     for d in CTLS.keys():
         co = CO(d)
+        ee = EE()
         ctls = CTLS[d]
         for i in range(len(ctls)):
             co.addController('c%s%s' % (d, i), controller=RemoteController, ip=ctls[i])
         co.build()
-        cos.append(co)
+        ee.build(d)
+        cos[co] = ee
     # make/setup Mininet object
     net = Mininet()
-    for co in cos:
+    for co, ee in cos.iteritems():
         co.injectInto(net)
+        ee.injectInto(net)
         #co.dumpCfg('co%d.json' % co.getId())
         vls = VLANS.get(co.getId())
         lf1_ifs = LF1_INFS.get(co.getId())
         lf2_ifs = LF2_INFS.get(co.getId())
         co.bootstrap(net, vls, lf1_ifs, lf2_ifs)
-    # start everything, let it run its course
     net.build()
-    for co in cos:
+    # post-build tasksincluding startup 
+    for co, ee in cos.iteritems():
         # remove IP from trunk interface of EE host (assigned by Mininet)
-        ee = net.get('h%d11' % co.getId())
-        ee.defaultIntf().ifconfig('inet', '0')
+        uni = net.get('h%d11' % co.getId())
+        uni.defaultIntf().ifconfig('inet', '0')
         co.start()
+        ee.start()
+
     CLI(net)
     net.stop()
 
