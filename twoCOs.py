@@ -20,22 +20,27 @@ from mininet.link import OVSIntf, Intf
 from mininet.util import quietRun
 from domains import Domain, SegmentRoutedDomain
 
-# Metro ONOS IP - determininstic
+# Metro ONOS IP - EE to Metro controller instance mapping
 MCTLS={ 'ee1000' : ['10.128.14.200'],
         'ee2000' : ['10.128.14.201'],
         'ee3000' : ['10.128.14.202'] }
+# true: use VLAN-aware host    
+VLAN=False
+
 SWOPTS='--no-local-port --no-slicing'
 
 class EE(Domain):
     """The UNI-side edge CpQD under Metro control."""
-    def build(self, cid):
-        """cid = ID of CO to which this edge 'belongs'"""
-
-        # add VLAN-aware host + EE node
-        uni = self.addHost('h%s11' % cid, cls=VLANHost)
+    def build(self, cid, hosts=1):
+        """cid : ID of CO to which this edge 'belongs'
+           hosts : number of hosts to add"""
+        # add UNI host(s) + EE node
         ee = self.addSwitch('ee%d000' % cid, cls=UserSwitch, dpopts=SWOPTS)
-        self.addLink(uni, ee)
-
+        for i in range(hosts):
+            hcls = VLANHost if VLAN else Host 
+            uni = self.addHost('h%s1%s' % (cid, i+1), cls=hcls)
+            self.addLink(uni, ee, port1=i+1, port2=i+1)
+        # add controller(s) off of static MCTLS list
         for i in MCTLS[ 'ee%d000' % cid ]:
             self.addController('c%d00' % cid, controller=RemoteController, ip=i)
 
@@ -78,7 +83,8 @@ class CO(SegmentRoutedDomain):
 
         # stitch the CO and EE domains together
         ee = net.get('ee%d000' % self.getId())
-        net.addLink(ee, leaf1)
+        net.addLink(ee, leaf1, port1=10, port2=10,
+                    addr1=self.getMAC('aa', 'aa'), addr2=self.getMAC('bb', 'bb'))
 
         # set UNI MAC/IP. fix this so it can take more than 10 VLANs.
         uni = net.get('h%d11' % self.getId())
@@ -93,10 +99,8 @@ class CO(SegmentRoutedDomain):
         #quietRun('ifconfig %s up' % leaf)
 
         # set the VLANs on host and cross connects.
-        for v in vlans:
-            uni.addVLAN(int(v), '10.0.%s.%d/24' % (v, self.getId()))
-            #quietRun('vconfig add %s %d' % (xc, v))
-            #quietRun('ifconfig %s.%d up' % (xc, v))
+        if VLAN:
+            map(lambda v: uni.addVLAN(v, '10.0.%d.%d/24' % (v, self.getId())), vlans)
 
         # attach outside interfaces
         for i in lf1_ifs:
@@ -257,10 +261,9 @@ def parseable(argv):
     return True
 
 def get(l, v):
-    try:
-        return l[v]
-    except IndexError:
-        return None
+    """'safe' get() for lists"""
+    el = l[v] if v < len(l) else None
+    return el
 
 if __name__ == '__main__':
     setLogLevel('info')
