@@ -46,7 +46,7 @@ class CO(SegmentRoutedDomain):
 
         # last leaf is the tether.
         self.addTether(l_msw[-1])
- 
+
         # interconnect spines and leaves
         for spine in l_nsw:
             for leaf in l_msw:
@@ -57,32 +57,41 @@ class CO(SegmentRoutedDomain):
         cpqd = self.addHost('h%s11' % self.getId(), cls=VLANHost)
         self.addLink(cpqd, ee)
 
-    def bootstrap(self, net, vlans, ifs=[]):
+    def bootstrap(self, net, vlans, lf1_ifs=[], lf2_ifs=[]):
         """ Do post-build, pre-start work """
-        xc='xc%s-eth0' % self.getId()
-        leaf='leaf%s01-eth0' % self.getId()
+        #xc='xc%s-eth0' % self.getId()
+        leaf1='leaf%s01' % self.getId()
+        leaf2='leaf%s02' % self.getId()
 
         # set EE MAC/IP. fix this so it can take more than 10 VLANs.
         ee = self.getHosts('h%s11' % self.getId())
         ee.setMAC(self.getMAC('11', '11'))
 
         # add the ports that we will use as VxLAN endpoints
-        quietRun('ip link add %s type veth peer name %s' % (xc, leaf))
-        quietRun('ifconfig %s hw ether %s' % (xc, self.getMAC('10', '01')))
-        quietRun('ifconfig %s hw ether %s' % (leaf, self.getMAC('01', '01')))
-        attachDev(net, 'leaf%s01' % self.getId(), leaf)
-        quietRun('ifconfig %s up' % xc)
-        quietRun('ifconfig %s up' % leaf)
+        #quietRun('ip link add %s type veth peer name %s' % (xc, leaf))
+        #quietRun('ifconfig %s hw ether %s' % (xc, self.getMAC('10', '01')))
+        #quietRun('ifconfig %s hw ether %s' % (leaf, self.getMAC('01', '01')))
+        #attachDev(net, 'leaf%s01' % self.getId(), leaf)
+        #quietRun('ifconfig %s up' % xc)
+        #quietRun('ifconfig %s up' % leaf)
 
         # set the VLANs on host and cross connects.
         for v in vlans:
             ee.addVLAN(int(v), '10.0.%s.%d/24' % (v, self.getId()))
-            quietRun('vconfig add %s %d' % (xc, v))
-            quietRun('ifconfig %s.%d up' % (xc, v))
+            #quietRun('vconfig add %s %d' % (xc, v))
+            #quietRun('ifconfig %s.%d up' % (xc, v))
 
         # attach outside interfaces
-        for i in ifs:
-            attachDev(net, self.getTether(), i)
+        for i in lf1_ifs:
+            #attachDev(net, self.getTether(), i)
+            attachDev(net, leaf1, i)
+
+        # attach outside interfaces
+        for i in lf2_ifs:
+            #attachDev(net, self.getTether(), i)
+            attachDev(net, leaf2, i)
+
+
 
     def toCfg(self):
         """ Dump a file in segment routing config file format. """
@@ -181,8 +190,9 @@ def setup():
         co.injectInto(net)
         #co.dumpCfg('co%d.json' % co.getId())
         vls = VLANS.get(co.getId())
-        ifs = INFS.get(co.getId()) 
-        co.bootstrap(net, vls, ifs)
+        lf1_ifs = LF1_INFS.get(co.getId())
+        lf2_ifs = LF2_INFS.get(co.getId())
+        co.bootstrap(net, vls, lf1_ifs, lf2_ifs)
     # start everything, let it run its course
     net.build()
     for co in cos:
@@ -196,10 +206,13 @@ def setup():
 # CO configuration arguments. DomainID to parameters in maps:
 # CTLS : domain ID to controllers (array)
 # VLANS : domain ID to vlans (array)
-# INFS : domain ID to external interfaces
+# LF1_INFS : domain ID to interfaces to OVS-VM
+# LF2_INFS : domain ID to external interfaces
+
 CTLS={}
 VLANS={}
-INFS={}
+LF1_INFS={}
+LF2_INFS={}
 
 def parseable(argv):
     """see if it can, and parse, the configs and add to maps of domainID to its configs."""
@@ -215,10 +228,12 @@ def parseable(argv):
             return False
         ctls = get(args, 1)
         vlans = get(args, 2)
-        ifs = get(args, 3)
+        lf1_ifs = get(args, 3)
+        lf2_ifs = get(args, 4)
         CTLS[did] = ctls.split(',')
         VLANS[did] = map(lambda v: int(v), vlans.split(','))
-        INFS[did] = ifs.split(',') if ifs is not None else []
+        LF1_INFS[did] = lf1_ifs.split(',') if lf1_ifs is not None else []
+        LF2_INFS[did] = lf2_ifs.split(',') if lf2_ifs is not None else []
     return True
 
 def get(l, v):
@@ -235,7 +250,8 @@ if __name__ == '__main__':
                'config<n> : configurations for a CO, format domainID:[ctrls]:[vlans]:[ifs]\n'
                '[ctrls]   : a comma-separated list of controller IPs\n',
                '[vlans]   : a comma-separated list of VLANs at the EE\n'
-               '[ifs]     : a comma-separated list of interfaces to the world (optional)')
+               '[lf1_ifs]     : a comma-separated list of interfaces to the OVS-VM (optional)',
+               '[lf2_ifs]     : a comma-separated list of interfaces to the world (optional)')
     else:
         if parseable(sys.argv[1:]):
             setup()
