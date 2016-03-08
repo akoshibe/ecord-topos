@@ -24,6 +24,8 @@ from domains import Domain, SegmentRoutedDomain
 MCTLS={ 'ee1000' : ['10.128.14.200'],
         'ee2000' : ['10.128.14.201'],
         'ee3000' : ['10.128.14.202'] }
+# number of hosts per domain
+HOSTS=[2, 1, 1]
 # true: use VLAN-aware host    
 VLAN=False
 
@@ -203,7 +205,7 @@ def setup():
         for i in range(len(ctls)):
             co.addController('c%s%s' % (d, i), controller=RemoteController, ip=ctls[i])
         co.build()
-        ee.build(d)
+        ee.build(d, HOSTS[d-1])
         cos[co] = ee
     # make/setup Mininet object
     net = Mininet()
