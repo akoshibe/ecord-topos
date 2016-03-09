@@ -10,4 +10,8 @@ ifconfig h211-eth0.100:7 10.0.100.17 netmask 255.255.255.0
 ifconfig h211-eth0.100:8 10.0.100.18 netmask 255.255.255.0
 ifconfig h211-eth0.100:9 10.0.100.19 netmask 255.255.255.0
 python -m SimpleHTTPServer 80 &
-iperf -s &
+iperf -s -p 443 &
+iperf -s -p 22 &
+iperf -s -p 25 &
+
+
