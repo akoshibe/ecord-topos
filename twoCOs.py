@@ -21,7 +21,9 @@ from mininet.util import quietRun
 from domains import Domain, SegmentRoutedDomain
 
 # Metro ONOS IP - determininstic
-MCTLS=[ '127.0.0.1' ]
+MCTLS={ 'ee1000' : ['10.128.14.200'],
+        'ee2000' : ['10.128.14.201'],
+        'ee3000' : ['10.128.14.202'] }
 SWOPTS='--no-local-port --no-slicing'
 
 class EE(Domain):
@@ -34,7 +36,7 @@ class EE(Domain):
         ee = self.addSwitch('ee%d000' % cid, cls=UserSwitch, dpopts=SWOPTS)
         self.addLink(uni, ee)
 
-        for i in MCTLS:
+        for i in MCTLS[ 'ee%d000' % cid ]:
             self.addController('c%d00' % cid, controller=RemoteController, ip=i)
 
 class CO(SegmentRoutedDomain):
